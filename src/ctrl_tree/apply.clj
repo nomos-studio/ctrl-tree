@@ -6,6 +6,9 @@
 
 ;; apply-op! — the functional core shared by live operation and replay.
 ;;
+;; Each method returns an enriched result map for txlog emission.
+;; Callers (core.clj) pass the result to ctrl-tree.txlog/emit-op!.
+;;
 ;; Replay is not re-running history. When ops are drawn from the txlog
 ;; and applied forward, apply-op! produces new state at current time.
 ;; The caller is responsible for op selection and sequencing; apply-op!
@@ -19,50 +22,66 @@
 
 (defmulti apply-op!
   "Apply a single ctrl-tree operation. Dispatches on :op.
-  Returns the op for txlog emission by the caller."
+  Returns an enriched result map for txlog emission."
   :op)
 
+;; Resolve the longest-prefix-matching mount for path. Must be called
+;; within dosync (reads mount-table ref).
+(defn- resolve-mount [path]
+  (some (fn [[prefix mnt]]
+          (when (= prefix (subvec path 0 (min (count prefix) (count path))))
+            mnt))
+        (sort-by (comp - count key) @refs/mount-table)))
+
 (defmethod apply-op! :ctrl/write [{:keys [path value]}]
-  (let [mount (dosync
-                (alter refs/tree-state assoc path value)
-                (some (fn [[prefix mnt]]
-                        (when (= prefix (subvec path 0 (min (count prefix) (count path))))
-                          mnt))
-                      (sort-by (comp - count key) @refs/mount-table)))]
+  (let [[before mount]
+        (dosync
+          (let [b (get @refs/tree-state path)]
+            (alter refs/tree-state assoc path value)
+            [b (resolve-mount path)]))]
     (when mount
-      (p/mount-write! mount path value))))
+      (p/mount-write! mount path value))
+    {:op :ctrl/write :path path :before before :after value}))
 
 (defmethod apply-op! :ctrl/recable [{:keys [changes]}]
-  (let [by-mount (dosync
-                   (doseq [[cable-path output-port] changes]
-                     (alter refs/routing assoc cable-path output-port))
-                   (group-by (fn [[cable-path _]]
-                               (some (fn [[prefix mnt]]
-                                       (when (= prefix (subvec cable-path 0 (min (count prefix) (count cable-path))))
-                                         mnt))
-                                     (sort-by (comp - count key) @refs/mount-table)))
-                             changes))]
+  (let [[before-map by-mount]
+        (dosync
+          (let [before (into {}
+                             (map (fn [[cp _]]
+                                    [cp (some-> (get @refs/routing cp) p/port-path)]))
+                             changes)]
+            (doseq [[cable-path output-port] changes]
+              (alter refs/routing assoc cable-path output-port))
+            [before
+             (group-by (fn [[cable-path _]] (resolve-mount cable-path)) changes)]))]
     (doseq [[mount changes-for-mount] by-mount]
       (when mount
-        (p/mount-recable! mount (into {} changes-for-mount))))))
+        (p/mount-recable! mount (into {} changes-for-mount))))
+    {:op      :ctrl/recable
+     :changes (mapv (fn [[cp port]]
+                      {:path   cp
+                       :before (get before-map cp)
+                       :after  (p/port-path port)})
+                    changes)}))
 
 (defmethod apply-op! :ctrl/surface-patch [{:keys [patch]}]
   ;; Surface patch transitions go through the current patch's teardown port.
-  ;; The interleave arbiter tears down the old patch atomically, applies structural
-  ;; changes via teardown-receiver, and installs the new interleave.
-  ;;
-  ;; patch here is a live patch-spec (with IPort/IReceiver objects).
-  ;; When called from the public API (core/apply-surface-patch!), the caller
-  ;; has already constructed the live spec.
+  ;; p/post! is synchronous: by the time it returns, teardown-receiver has run,
+  ;; structural refs are updated, and the new interleave is installed.
   ;;
   ;; Txlog replay: the logged op carries only serialisable paths; live cable
   ;; objects are not present. Replaying a surface-patch op from the txlog can
   ;; restore mount-table and routing refs but cannot reconstruct the live cable
-  ;; interleave without a node registry (TODO). For now, txlog replay of
-  ;; surface-patch is structural-only.
+  ;; interleave without a node registry (TODO).
   (if-let [{:keys [teardown-port]} @refs/current-patch]
     (p/post! teardown-port patch)
-    (patch/install-patch! patch)))
+    (patch/install-patch! patch))
+  ;; Build serialisable result for txlog. Port objects → their paths.
+  {:op       :ctrl/surface-patch
+   :mounts   (set (keys (:mounts patch)))
+   :unmounts (:unmounts patch)
+   :routing  (into {} (map (fn [[cp port]] [cp (p/port-path port)])) (:routing patch []))
+   :uncables (:uncables patch)})
 
 (defmethod apply-op! :ctrl/checkpoint [{:keys [state]}]
   ;; Materialisation from a checkpoint. Restores structural refs and
@@ -73,14 +92,11 @@
     (dosync
       (ref-set refs/mount-table (or mounts {}))
       (ref-set refs/routing     (or routing {})))
-    ;; Cable state atoms are addressed by path in tree-state.
-    ;; A checkpoint restores them by writing directly to the atom
-    ;; rather than routing through ctrl-write! (which would dispatch to mounts).
     ;; TODO: INode registry needed to look up state atoms by path.
-    ;; For now, cable-states is advisory; implement once node registry exists.
     (when (seq cable-states)
       (throw (ex-info "checkpoint cable-state restore not yet implemented — node registry required"
-                      {:cable-states cable-states})))))
+                      {:cable-states cable-states}))))
+  {:op :ctrl/checkpoint :state state})
 
 (defmethod apply-op! :default [op]
   (throw (ex-info "unknown ctrl-tree op" {:op (:op op)})))
