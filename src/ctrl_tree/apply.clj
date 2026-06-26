@@ -1,7 +1,8 @@
 ; SPDX-License-Identifier: EPL-2.0
 (ns ctrl-tree.apply
   (:require [protomatter.protocols :as p]
-            [ctrl-tree.refs :as refs]))
+            [ctrl-tree.refs :as refs]
+            [ctrl-tree.patch :as patch]))
 
 ;; apply-op! — the functional core shared by live operation and replay.
 ;;
@@ -46,16 +47,22 @@
         (p/mount-recable! mount (into {} changes-for-mount))))))
 
 (defmethod apply-op! :ctrl/surface-patch [{:keys [patch]}]
-  (let [{:keys [mounts unmounts cables uncables]} patch]
-    (dosync
-      (doseq [[prefix descriptor] mounts]
-        (alter refs/mount-table assoc prefix descriptor))
-      (doseq [prefix unmounts]
-        (alter refs/mount-table dissoc prefix))
-      (doseq [[cable-path output-port] cables]
-        (alter refs/routing assoc cable-path output-port))
-      (doseq [cable-path uncables]
-        (alter refs/routing dissoc cable-path)))))
+  ;; Surface patch transitions go through the current patch's teardown port.
+  ;; The interleave arbiter tears down the old patch atomically, applies structural
+  ;; changes via teardown-receiver, and installs the new interleave.
+  ;;
+  ;; patch here is a live patch-spec (with IPort/IReceiver objects).
+  ;; When called from the public API (core/apply-surface-patch!), the caller
+  ;; has already constructed the live spec.
+  ;;
+  ;; Txlog replay: the logged op carries only serialisable paths; live cable
+  ;; objects are not present. Replaying a surface-patch op from the txlog can
+  ;; restore mount-table and routing refs but cannot reconstruct the live cable
+  ;; interleave without a node registry (TODO). For now, txlog replay of
+  ;; surface-patch is structural-only.
+  (if-let [{:keys [teardown-port]} @refs/current-patch]
+    (p/post! teardown-port patch)
+    (patch/install-patch! patch)))
 
 (defmethod apply-op! :ctrl/checkpoint [{:keys [state]}]
   ;; Materialisation from a checkpoint. Restores structural refs and

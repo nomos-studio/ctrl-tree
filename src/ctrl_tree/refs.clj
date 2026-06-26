@@ -22,6 +22,14 @@
 ;;   Written by ctrl-write! after mount resolution; read by the REPL,
 ;;   conductor arcs, and checkpoint generation.
 
-(def mount-table (ref {}))
-(def routing     (ref {}))
-(def tree-state  (ref {}))
+(def mount-table   (ref {}))
+(def routing       (ref {}))
+(def tree-state    (ref {}))
+
+;; current-patch — the active patch interleave descriptor.
+;; {:teardown-port port}
+;; nil before the first install-patch! call.
+;; Replaced atomically in dosync whenever install-patch! completes.
+;; Posting to :teardown-port triggers the full patch transition:
+;;   old interleave torn down → structural refs updated → new interleave installed.
+(def current-patch (ref nil))
