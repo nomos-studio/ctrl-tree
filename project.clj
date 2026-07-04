@@ -7,6 +7,8 @@
   :dependencies [[org.clojure/clojure "1.12.2"]
                  [nomos-studio/protomatter "0.1.0-SNAPSHOT"]
                  [nomos-studio/txlog "0.1.0-SNAPSHOT"]]
+  :plugins       [[lein-shell "0.5.0"]]
+  :aliases       {"lint.reuse" ["shell" "reuse" "lint"]}
   :source-paths ["src"]
   :test-paths   ["test"]
   :target-path  "target/%s"

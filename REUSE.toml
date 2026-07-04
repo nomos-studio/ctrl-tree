@@ -1,0 +1,16 @@
+version = 1
+SPDX-PackageName = "ctrl-tree"
+SPDX-PackageSupplier = "rodgert@twrodgers.com"
+SPDX-PackageDownloadLocation = "https://github.com/nomos-studio/ctrl-tree"
+
+[[annotations]]
+path = ["src/**", "test/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2025-2026 nomos-studio contributors"
+SPDX-License-Identifier = "EPL-2.0"
+
+[[annotations]]
+path = ["project.clj", "pom.xml", "erl_crash.dump", ".gitignore"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2025-2026 nomos-studio contributors"
+SPDX-License-Identifier = "EPL-2.0"
