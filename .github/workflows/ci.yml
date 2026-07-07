@@ -18,6 +18,16 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: ctrl-tree
+      - uses: actions/checkout@v4
+        with:
+          repository: nomos-studio/protomatter
+          path: protomatter
+      - uses: actions/checkout@v4
+        with:
+          repository: nomos-studio/txlog
+          path: txlog
       - name: Set up Java 21 (Temurin)
         uses: actions/setup-java@v4
         with:
@@ -27,11 +37,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('project.clj') }}
+          key: ${{ runner.os }}-maven-${{ hashFiles('ctrl-tree/project.clj', 'protomatter/project.clj', 'txlog/clj/project.clj') }}
           restore-keys: ${{ runner.os }}-maven-
       - name: Install Leiningen
         uses: DeLaGuardo/setup-clojure@13.6.0
         with:
           lein: latest
+      - name: Install protomatter
+        run: lein install
+        working-directory: protomatter
+      - name: Install txlog
+        run: lein install
+        working-directory: txlog/clj
       - name: Run test suite
         run: lein test
+        working-directory: ctrl-tree
