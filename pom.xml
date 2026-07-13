@@ -18,7 +18,7 @@
     <url>https://github.com/nomos-studio/ctrl-tree</url>
     <connection>scm:git:git://github.com/nomos-studio/ctrl-tree.git</connection>
     <developerConnection>scm:git:ssh://git@github.com/nomos-studio/ctrl-tree.git</developerConnection>
-    <tag>ad175639de6a36d638e8cc5f052a7dd52e75d102</tag>
+    <tag>25cfcae987fb7d57baf807144bfb283ba52b6f10</tag>
   </scm>
   <build>
     <sourceDirectory>src</sourceDirectory>

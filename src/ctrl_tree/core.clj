@@ -3,6 +3,7 @@
   (:require [ctrl-tree.ops   :as ops]
             [ctrl-tree.apply :as apply]
             [ctrl-tree.patch :as patch]
+            [ctrl-tree.refs  :as refs]
             [ctrl-tree.txlog :as txlog]))
 
 ;; Public API. Each function applies the op and emits to the txlog sink
@@ -29,6 +30,21 @@
   (let [result (apply/apply-op! (ops/write-op path value))]
     (txlog/emit-op! result)
     result))
+
+(defn ctrl-read
+  "Read the value at path from tree-state. Returns nil when absent.
+
+  Symmetric counterpart to ctrl-write! and the single read entry point for
+  application code — prefer this over dereferencing ctrl-tree.refs/tree-state
+  directly. A single deref is a consistent snapshot read, so no dosync is
+  needed. Reads are pure: no txlog emission, no mount dispatch.
+
+  Note: every ctrl-write! is persisted to the SQLite txlog (values serialised
+  via pr-str), so only values that round-trip through read-string belong on the
+  tree. Heavy/derived objects live in caches keyed by a serialisable descriptor,
+  not on the tree itself."
+  [path]
+  (get @refs/tree-state path))
 
 (defn recable!
   "Atomically reroute cable outputs. changes is {cable-path output-port}.
