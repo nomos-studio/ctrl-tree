@@ -26,6 +26,16 @@
 (def routing       (ref {}))
 (def tree-state    (ref {}))
 
+;; watchers / global-watchers — post-commit path observers.
+;; These are observers, not fabric: they never participate in the write dosync.
+;; They are fired on the writing thread after a :ctrl/write commits (see
+;; ctrl-tree.apply/notify-watchers!), registered via ctrl-tree.core/ctrl-watch!.
+;;
+;; watchers        — path → {watch-key → (fn [path before after])}
+;; global-watchers — watch-key → (fn [path before after])
+(def watchers        (atom {}))
+(def global-watchers (atom {}))
+
 ;; current-patch — the active patch interleave descriptor.
 ;; {:teardown-port port}
 ;; nil before the first install-patch! call.

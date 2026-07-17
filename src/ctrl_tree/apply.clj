@@ -33,6 +33,18 @@
             mnt))
         (sort-by (comp - count key) @refs/mount-table)))
 
+;; Fire path-specific and global observers post-commit. Runs on the writing
+;; thread after mount dispatch. Exceptions are swallowed to stderr so one bad
+;; watcher cannot break the write or starve the others.
+(defn- notify-watchers! [path before after]
+  (letfn [(safe [f] (try (f path before after)
+                         (catch Throwable e
+                           (binding [*out* *err*]
+                             (println (str "[ctrl-tree] watcher error at "
+                                           (pr-str path) ": " (.getMessage e)))))))]
+    (doseq [[_ f] (get @refs/watchers path)] (safe f))
+    (doseq [[_ f] @refs/global-watchers]      (safe f))))
+
 (defmethod apply-op! :ctrl/write [{:keys [path value]}]
   (let [[before mount]
         (dosync
@@ -41,6 +53,7 @@
             [b (resolve-mount path)]))]
     (when mount
       (p/mount-write! mount path value))
+    (notify-watchers! path before value)
     {:op :ctrl/write :path path :before before :after value}))
 
 (defmethod apply-op! :ctrl/recable [{:keys [changes]}]

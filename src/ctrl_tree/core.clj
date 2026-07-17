@@ -80,3 +80,56 @@
   (let [result (apply/apply-op! (ops/checkpoint-op state))]
     (txlog/emit-op! result)
     result))
+
+;; Path-watch primitive. Post-commit observers on a ctrl-tree path — the
+;; substrate answer to "react to a change at this path" without dereferencing
+;; ctrl-tree.refs/tree-state and diffing the whole map on every write.
+
+(defn ctrl-watch!
+  "Register `f` as an observer of `path`. `f` is (fn [path before after]),
+  called *after* every ctrl-write! to `path` commits.
+
+  Contract:
+    - Fires post-commit, on the writing thread, after mount dispatch — so a
+      ctrl-read inside `f` sees `after`. Same point and thread as mount-write!.
+    - Fires on EVERY write to `path`, whether or not the value changed. A `before`
+      of nil means the path had no prior value.
+    - Only :ctrl/write fires watchers; structural ops (recable, surface-patch,
+      checkpoint) do not.
+    - Exceptions thrown by `f` are swallowed to stderr; other watchers still fire.
+      Defer heavy or re-entrant work (another ctrl-write!) to a future.
+
+  `watch-key` identifies this watcher for later removal; re-registering the same
+  path+watch-key replaces the callback. Returns nil."
+  [path watch-key f]
+  (swap! refs/watchers assoc-in [path watch-key] f)
+  nil)
+
+(defn ctrl-unwatch!
+  "Remove the watcher identified by `watch-key` from `path`. No-op if absent.
+  Returns nil."
+  [path watch-key]
+  (swap! refs/watchers update path dissoc watch-key)
+  nil)
+
+(defn ctrl-unwatch-all!
+  "Remove every watcher registered on `path`. Returns nil."
+  [path]
+  (swap! refs/watchers dissoc path)
+  nil)
+
+(defn ctrl-watch-global!
+  "Register `f` = (fn [path before after]) to fire on EVERY ctrl-write!,
+  regardless of path. Same post-commit contract as ctrl-watch!. `watch-key`
+  identifies the watcher for removal; re-registering the key replaces it.
+  Returns nil."
+  [watch-key f]
+  (swap! refs/global-watchers assoc watch-key f)
+  nil)
+
+(defn ctrl-unwatch-global!
+  "Remove the global watcher identified by `watch-key`. No-op if absent.
+  Returns nil."
+  [watch-key]
+  (swap! refs/global-watchers dissoc watch-key)
+  nil)
